@@ -73,6 +73,22 @@ get_backend_port() {
   read -p "> " backend_port
 }
 
+get_landing_url() {
+
+  print_banner
+  printf "${WHITE} 💻 Digite o domínio do LANDING PAGE para a ${instancia_add}:${GRAY_LIGHT}"
+  printf "\n\n"
+  read -p "> " landing_url
+}
+
+get_landing_port() {
+
+  print_banner
+  printf "${WHITE} 💻 Digite a porta do LANDING PAGE para a ${instancia_add}; Ex: 6000 A 6999 ${GRAY_LIGHT}"
+  printf "\n\n"
+  read -p "> " landing_port
+}
+
 get_redis_port() {
   
   print_banner
@@ -166,12 +182,15 @@ get_urls() {
   get_frontend_port
   get_backend_port
   get_redis_port
+  get_landing_url
+  get_landing_port
 }
 
 software_update() {
   get_empresa_atualizar
   frontend_update
   backend_update
+  landing_update
 }
 
 software_delete() {
