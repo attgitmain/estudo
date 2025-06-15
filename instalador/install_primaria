@@ -67,6 +67,13 @@ frontend_node_build
 frontend_start_pm2
 frontend_nginx_setup
 
+# landing related
+landing_set_env
+landing_node_dependencies
+landing_node_build
+landing_start_pm2
+landing_nginx_setup
+
 # network related
 system_nginx_conf
 system_nginx_restart

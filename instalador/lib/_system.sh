@@ -79,9 +79,11 @@ deletar_tudo() {
   sudo su - root <<EOF
   docker container rm redis-${empresa_delete} --force
   cd && rm -rf /etc/nginx/sites-enabled/${empresa_delete}-frontend
-  cd && rm -rf /etc/nginx/sites-enabled/${empresa_delete}-backend  
+  cd && rm -rf /etc/nginx/sites-enabled/${empresa_delete}-backend
+  cd && rm -rf /etc/nginx/sites-enabled/${empresa_delete}-landing
   cd && rm -rf /etc/nginx/sites-available/${empresa_delete}-frontend
   cd && rm -rf /etc/nginx/sites-available/${empresa_delete}-backend
+  cd && rm -rf /etc/nginx/sites-available/${empresa_delete}-landing
   
   sleep 2
 
@@ -95,7 +97,7 @@ sleep 2
 
 sudo su - deploy <<EOF
  rm -rf /home/deploy/${empresa_delete}
- pm2 delete ${empresa_delete}-frontend ${empresa_delete}-backend
+ pm2 delete ${empresa_delete}-frontend ${empresa_delete}-backend ${empresa_delete}-landing
  pm2 save
 EOF
 
@@ -250,13 +252,14 @@ EOF
 
   backend_domain=$(echo "${backend_url/https:\/\/}")
   frontend_domain=$(echo "${frontend_url/https:\/\/}")
+  landing_domain=$(echo "${landing_url/https:\/\/}")
 
   sudo su - root <<EOF
   certbot -m $deploy_email \
           --nginx \
           --agree-tos \
           --non-interactive \
-          --domains $backend_domain,$frontend_domain
+          --domains $backend_domain,$frontend_domain,$landing_domain
 EOF
 
   sleep 2
