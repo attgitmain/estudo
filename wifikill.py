@@ -11,9 +11,8 @@ import os
 import logging
 import time
 import ipaddress
-import netifaces
-import subprocess
 import re
+import subprocess
 from scapy.all import arping, ARP, send, conf, get_if_hwaddr, sr1
 
 # Silence Scapy warnings
@@ -89,25 +88,26 @@ def print_divider():
 
 
 def get_network_params():
-    """Return interface, scan range and gateway IP."""
-    iface = conf.iface
-    gws = netifaces.gateways().get('default', {})
-    gw = gws.get(netifaces.AF_INET)
-    if gw:
-        gateway_ip, iface = gw
-
-    addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
-    if not addrs:
-        raise SystemExit(f"No IPv4 address found on interface {iface}")
-
-    addr = addrs[0]['addr']
-    mask = addrs[0].get('netmask', '255.255.255.0')
-    network = ipaddress.IPv4Network(f"{addr}/{mask}", strict=False)
+    """Return interface, scan range and gateway IP using system commands."""
+    if os.name == "nt":
+        out = subprocess.check_output("ipconfig", shell=True, text=True, encoding="utf-8")
+        m_ad = re.search(r"Adaptador de Rede sem fio (.+):", out) or \
+               re.search(r"Adaptador Ethernet (.+):", out)
+        iface = m_ad.group(1).strip() if m_ad else conf.iface
+        ip = re.search(r"IPv4.*?:\s*([\d\.]+)", out).group(1)
+        mask = re.search(r"M[áa]scara de sub-rede.*?:\s*([\d\.]+)", out).group(1)
+        gateway_ip = re.search(r"Gateway padr[ãa]o.*?:\s*([\d\.]+)", out).group(1)
+    else:
+        out = subprocess.check_output("ip route show default", shell=True, text=True)
+        gw, iface = re.search(r"default via ([\d\.]+) dev (\w+)", out).groups()
+        gateway_ip = gw
+        out2 = subprocess.check_output(f"ip -4 addr show {iface}", shell=True, text=True)
+        m = re.search(r"inet ([\d\.]+)/(\d+)", out2)
+        ip, plen = m.groups()
+        mask = ipaddress.IPv4Network(f"0.0.0.0/{plen}").netmask.exploded
+    network = ipaddress.IPv4Network(f"{ip}/{mask}", strict=False)
     ip_range = str(network)
-
-    if not gw:
-        gateway_ip = str(next(network.hosts()))
-
+    conf.iface = iface
     return iface, ip_range, gateway_ip
 
 
