@@ -8,9 +8,10 @@ It must be run as root (sudo) in order to send the required packets.
 """
 
 import os
-import socket
 import logging
 import time
+import ipaddress
+import netifaces
 from scapy.all import arping, ARP, send, conf, get_if_hwaddr
 
 # Silence Scapy warnings
@@ -18,9 +19,9 @@ logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 conf.verb = 0
 
 
-def get_ip_macs(ips, iface):
+def get_ip_macs(ips, iface, timeout=2):
     """Return a list of ``(ip, mac)`` tuples for devices on the network."""
-    answers, _ = arping(ips, iface=iface, verbose=0)
+    answers, _ = arping(ips, iface=iface, timeout=timeout, verbose=0)
     return [(r.psrc, r.hwsrc) for _, r in answers]
 
 
@@ -48,42 +49,70 @@ def restore(victim_ip, victim_mac, gateway_ip, gateway_mac):
     send(pkt, verbose=0)
 
 
-def get_lan_ip():
-    """Return the LAN IP by opening a UDP socket to a public address."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.connect(("8.8.8.8", 80))
-        return sock.getsockname()[0]
-
-
 def print_divider():
     print('-' * 40)
 
 
+def get_network_params():
+    """Return interface, scan range and gateway IP."""
+    iface = conf.iface
+    gws = netifaces.gateways().get('default', {})
+    gw = gws.get(netifaces.AF_INET)
+    if gw:
+        gateway_ip, iface = gw
+
+    addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+    if not addrs:
+        raise SystemExit(f"No IPv4 address found on interface {iface}")
+
+    addr = addrs[0]['addr']
+    mask = addrs[0].get('netmask', '255.255.255.0')
+    network = ipaddress.IPv4Network(f"{addr}/{mask}", strict=False)
+    ip_range = str(network)
+
+    if not gw:
+        gateway_ip = str(next(network.hosts()))
+
+    return iface, ip_range, gateway_ip
+
+
+def is_admin():
+    """Return ``True`` if the script is running with administrative rights."""
+    if os.name != "nt":
+        return os.geteuid() == 0
+
+    try:
+        import ctypes  # imported only on Windows
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except Exception:
+        return False
+
+
 def check_root():
-    """Exit the script if not running as root."""
-    if os.geteuid() != 0:
-        raise SystemExit("You need to run the script as root/sudo.")
+    """Exit the script if not executed with administrator privileges."""
+    if not is_admin():
+        raise SystemExit(
+            "You need to run the script as root/sudo or with Administrator "
+            "privileges."
+        )
 
 
 def main():
     check_root()
 
-    # determine your interface MAC to use as spoof source
-    iface = conf.iface
+    # detect network parameters and our MAC address
+    iface, ip_range, gateway_ip = get_network_params()
     src_mac = get_if_hwaddr(iface)
+
+    print(f"Using interface {iface} with scan range {ip_range}")
+    print_divider()
 
     refreshing = True
     gateway_mac = None
 
     while refreshing:
-        # build IP range and gateway IP
-        my_ip = get_lan_ip()
-        octets = my_ip.split('.')
-        gateway_ip = '.'.join(octets[:3] + ['1'])
-        ip_range = '.'.join(octets[:3] + ['0/24'])
-
         # discover devices
-        devices = get_ip_macs(ip_range, iface)
+        devices = get_ip_macs(ip_range, iface, timeout=4)
 
         print_divider()
         print("Connected devices:")
