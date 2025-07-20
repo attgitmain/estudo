@@ -12,6 +12,8 @@ import logging
 import time
 import ipaddress
 import netifaces
+import subprocess
+import re
 from scapy.all import arping, ARP, send, conf, get_if_hwaddr
 
 # Silence Scapy warnings
@@ -19,8 +21,41 @@ logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
 conf.verb = 0
 
 
+def ping_sweep(ip_range):
+    """Ping all hosts in ``ip_range`` to populate the ARP cache on Windows."""
+    network = ipaddress.ip_network(ip_range, strict=False)
+    for ip in network.hosts():
+        cmd = ["ping", "-n", "1", "-w", "250", str(ip)]
+        if os.name != "nt":
+            cmd = ["ping", "-c", "1", "-W", "1", str(ip)]
+        subprocess.run(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+
+def parse_arp_cache():
+    """Return ``(ip, mac)`` pairs from the local ARP cache."""
+    output = subprocess.check_output(
+        ["arp", "-a"], text=True, encoding="utf-8"
+    )
+    pairs = []
+    for line in output.splitlines():
+        match = re.search(
+            r"(\d{1,3}(?:\.\d{1,3}){3})\s+([0-9a-fA-F:-]{17})",
+            line,
+        )
+        if match:
+            ip = match.group(1)
+            mac = match.group(2).replace("-", ":").lower()
+            pairs.append((ip, mac))
+    return pairs
+
+
 def get_ip_macs(ips, iface, timeout=2):
     """Return a list of ``(ip, mac)`` tuples for devices on the network."""
+    if os.name == "nt":
+        ping_sweep(ips)
+        return parse_arp_cache()
     answers, _ = arping(ips, iface=iface, timeout=timeout, verbose=0)
     return [(r.psrc, r.hwsrc) for _, r in answers]
 
