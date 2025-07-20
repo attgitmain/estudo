@@ -14,7 +14,7 @@ import ipaddress
 import netifaces
 import subprocess
 import re
-from scapy.all import arping, ARP, send, conf, get_if_hwaddr
+from scapy.all import arping, ARP, send, conf, get_if_hwaddr, sr1
 
 # Silence Scapy warnings
 logging.getLogger("scapy.runtime").setLevel(logging.ERROR)
@@ -111,6 +111,30 @@ def get_network_params():
     return iface, ip_range, gateway_ip
 
 
+def get_gateway_mac(iface, gateway_ip):
+    """Return the MAC address for ``gateway_ip`` on ``iface``."""
+    if os.name == "nt":
+        subprocess.run([
+            "ping",
+            "-n",
+            "1",
+            gateway_ip,
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for ip, mac in parse_arp_cache():
+            if ip == gateway_ip:
+                return mac
+    else:
+        ans = sr1(
+            ARP(op=1, pdst=gateway_ip),
+            iface=iface,
+            timeout=2,
+            verbose=0,
+        )
+        if ans:
+            return ans.hwsrc
+    return None
+
+
 def is_admin():
     """Return ``True`` if the script is running with administrative rights."""
     if os.name != "nt":
@@ -135,17 +159,18 @@ def check_root():
 def main():
     check_root()
 
-    # detect network parameters and our MAC address
-    iface, ip_range, gateway_ip = get_network_params()
-    src_mac = get_if_hwaddr(iface)
-
-    print(f"Using interface {iface} with scan range {ip_range}")
-    print_divider()
-
     refreshing = True
+    choice = None
     gateway_mac = None
 
     while refreshing:
+        iface, ip_range, gateway_ip = get_network_params()
+        src_mac = get_if_hwaddr(iface)
+        gateway_mac = get_gateway_mac(iface, gateway_ip)
+
+        print(f"Using interface {iface} with scan range {ip_range}")
+        print_divider()
+
         # discover devices
         devices = get_ip_macs(ip_range, iface, timeout=4)
 
