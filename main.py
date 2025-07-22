@@ -1,9 +1,19 @@
 import time
 import keyboard
-import pyautogui
 import psutil
 import sys
 import os
+
+# Em sistemas que não são Windows, o pyautogui requer a variável DISPLAY.
+if sys.platform != "win32" and "DISPLAY" not in os.environ:
+    os.environ["DISPLAY"] = ":0"  # tenta usar o display padrão
+
+try:
+    import pyautogui
+except Exception as e:
+    print("Erro ao inicializar o pyautogui:", e)
+    print("Certifique-se de que um servidor gráfico está ativo e a variável DISPLAY esteja configurada.")
+    sys.exit(1)
 
 # Garante que a pasta 'modules' seja encontrada mesmo se executado de fora
 sys.path.append(os.path.join(os.path.dirname(__file__), "modules"))
