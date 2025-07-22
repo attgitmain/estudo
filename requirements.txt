@@ -1,6 +1,5 @@
 pyautogui
 keyboard
-time
 mss
 opencv-python
 pytesseract
