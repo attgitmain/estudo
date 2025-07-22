@@ -1,4 +1,4 @@
-import pyautogui
+import keyboard
 import time
 
 from config import LOOT_KEY, LOOT_DELAY
@@ -6,5 +6,5 @@ from config import LOOT_KEY, LOOT_DELAY
 
 def loot():
     """Press the loot key and wait for the delay."""
-    pyautogui.press(LOOT_KEY)
+    keyboard.press_and_release(LOOT_KEY)
     time.sleep(LOOT_DELAY)
