@@ -4,3 +4,4 @@ mss
 opencv-python
 pytesseract
 numpy
+pydirectinput
