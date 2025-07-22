@@ -1,10 +1,13 @@
-import keyboard
 import time
+try:
+    import pydirectinput
+except ImportError:  # fallback if pydirectinput is missing
+    import pyautogui as pydirectinput
 
 from config import LOOT_KEY, LOOT_DELAY
 
 
 def loot():
     """Press the loot key and wait for the delay."""
-    keyboard.press_and_release(LOOT_KEY)
+    pydirectinput.press(LOOT_KEY)
     time.sleep(LOOT_DELAY)
